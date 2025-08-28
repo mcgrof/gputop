@@ -12,7 +12,22 @@ a unified front to this in a way I think makse sense:
 
 Here's example output from a test run monitoring ResNet-18 training using [AdamWPrune](https://github.com/mcgrof/AdamWPrune) on an AMD Radeon Pro W7900:
 
+### Initialization
+
+![Initializaiton](images/init.png)
+
+As you can see, once you hit CTRL-C you will end up with two extra files, a
+PNG file and a text file summary.
+
+### Console
+
+However in the meantime you will see progress in a nice console:
+
+![Console graph](images/console.png)
+
 ### Performance Plots
+
+This is what the final PNG file looks like:
 
 ![GPU Performance - AMD Radeon Pro W7900](images/stats-amd-20250827-014218_plot.png)
 
