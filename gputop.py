@@ -890,7 +890,8 @@ class GPUMonitor:
         return stats
 
     def _get_nvidia_desktop_stats(self, gpu):
-        """Get stats for desktop NVIDIA GPU using nvidia-ml-py"""
+        """Get stats for desktop NVIDIA GPU using nvidia-ml-py
+        Enhanced support for H100, B200, B300, and RTX GPUs"""
         stats = {
             "name": gpu["name"],
             "utilization": 0,
@@ -922,7 +923,8 @@ class GPUMonitor:
             stats["memory_total"] = mem_info.total / (1024 * 1024)
             stats["memory_percent"] = (mem_info.used / mem_info.total) * 100
 
-            # Temperature
+            # Multiple Temperature Sensors (H100, B200, B300, RTX support)
+            # GPU Core Temperature
             try:
                 temp = pynvml.nvmlDeviceGetTemperature(
                     handle, pynvml.NVML_TEMPERATURE_GPU
@@ -930,6 +932,39 @@ class GPUMonitor:
                 stats["temperatures"]["GPU"] = temp
             except:
                 pass
+
+            # Memory Temperature (H100, B200, B300, high-end RTX)
+            try:
+                mem_temp = pynvml.nvmlDeviceGetTemperature(
+                    handle, pynvml.NVML_TEMPERATURE_MEMORY
+                )
+                stats["temperatures"]["Memory"] = mem_temp
+            except:
+                pass
+
+            # Get temperature thresholds (for GPU sensor)
+            gpu_limits = {}
+            try:
+                # Slowdown threshold
+                slowdown_temp = pynvml.nvmlDeviceGetTemperatureThreshold(
+                    handle, pynvml.NVML_TEMPERATURE_THRESHOLD_SLOWDOWN
+                )
+                gpu_limits["slowdown"] = slowdown_temp
+            except:
+                pass
+
+            try:
+                # Shutdown threshold
+                shutdown_temp = pynvml.nvmlDeviceGetTemperatureThreshold(
+                    handle, pynvml.NVML_TEMPERATURE_THRESHOLD_SHUTDOWN
+                )
+                gpu_limits["shutdown"] = shutdown_temp
+            except:
+                pass
+
+            # Store limits under GPU sensor (matching AMD structure)
+            if gpu_limits and "GPU" in stats["temperatures"]:
+                stats["temp_limits"]["GPU"] = gpu_limits
 
             # Power
             try:
@@ -940,12 +975,32 @@ class GPUMonitor:
             except:
                 pass
 
-            # Fan speed
+            # Multi-fan support (RTX GPUs with multiple fans)
             try:
-                fan = pynvml.nvmlDeviceGetFanSpeed(handle)
-                stats["fan_speed"] = fan
+                # Try to get number of fans (newer API)
+                num_fans = pynvml.nvmlDeviceGetNumFans(handle)
+                if num_fans > 1:
+                    # Multiple fans - average them
+                    fan_speeds = []
+                    for fan_idx in range(num_fans):
+                        try:
+                            fan_speed = pynvml.nvmlDeviceGetFanSpeed_v2(handle, fan_idx)
+                            fan_speeds.append(fan_speed)
+                        except:
+                            pass
+                    if fan_speeds:
+                        stats["fan_speed"] = sum(fan_speeds) / len(fan_speeds)
+                else:
+                    # Single fan - use legacy API
+                    fan = pynvml.nvmlDeviceGetFanSpeed(handle)
+                    stats["fan_speed"] = fan
             except:
-                pass
+                # Fallback to legacy single fan API
+                try:
+                    fan = pynvml.nvmlDeviceGetFanSpeed(handle)
+                    stats["fan_speed"] = fan
+                except:
+                    pass
 
             # Clocks
             try:
@@ -957,6 +1012,38 @@ class GPUMonitor:
                 )
                 stats["clocks"]["gpu"] = graphics_clock
                 stats["clocks"]["memory"] = memory_clock
+            except:
+                pass
+
+            # PCIe Information (useful for H100, B200, B300)
+            try:
+                pcie_gen = pynvml.nvmlDeviceGetCurrPcieLinkGeneration(handle)
+                pcie_width = pynvml.nvmlDeviceGetCurrPcieLinkWidth(handle)
+                pcie_throughput = pynvml.nvmlDeviceGetPcieThroughput(
+                    handle, pynvml.NVML_PCIE_UTIL_TX_BYTES
+                )
+                stats["pcie"] = {
+                    "gen": pcie_gen,
+                    "width": pcie_width,
+                    "throughput_tx": pcie_throughput,
+                }
+            except:
+                pass
+
+            # NVLink Information (H100, B200, B300)
+            try:
+                # Get number of NVLink links
+                nvlink_count = 0
+                for link_id in range(18):  # H100 has up to 18 NVLink connections
+                    try:
+                        state = pynvml.nvmlDeviceGetNvLinkState(handle, link_id)
+                        if state == pynvml.NVML_FEATURE_ENABLED:
+                            nvlink_count += 1
+                    except:
+                        break
+
+                if nvlink_count > 0:
+                    stats["nvlink"] = {"active_links": nvlink_count}
             except:
                 pass
 
